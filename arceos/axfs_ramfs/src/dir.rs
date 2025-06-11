@@ -67,6 +67,18 @@ impl DirNode {
         children.remove(name);
         Ok(())
     }
+
+    pub fn rename_node(&self, src_name: &str, dst_name: &str) -> VfsResult {
+        let mut children = self.children.write();
+        let node = children.get(src_name).ok_or(VfsError::NotFound)?;
+        children.get(dst_name).map_or(Ok(()), |_|Err(VfsError::AlreadyExists))?;
+        if src_name == dst_name {
+            return Ok(());
+        }
+        let node = children.remove(src_name).ok_or(VfsError::NotFound)?;
+        children.insert(dst_name.into(), node);
+        Ok(())
+    }
 }
 
 impl VfsNodeOps for DirNode {
@@ -162,6 +174,42 @@ impl VfsNodeOps for DirNode {
             Err(VfsError::InvalidInput) // remove '.' or '..
         } else {
             self.remove_node(name)
+        }
+    }
+
+    fn rename(&self, src_path: &str, dst_path: &str) -> VfsResult {
+        log::debug!("rename at ramfs: {} to: {}", src_path, dst_path);
+
+        let (name, rest) = split_path(src_path);
+        let (_dname, drest2) = split_path(dst_path);
+        let Some(drest2) = drest2 else {
+                return Err(VfsError::InvalidInput);
+        };
+        let (dname, drest) = split_path(drest2);
+        if let Some(rest) = rest {
+            if name != dname {
+                return Err(VfsError::InvalidInput);
+            }
+            let Some(_drest) = drest else {
+                return Err(VfsError::InvalidInput);
+            };
+            match name {
+                "" | "." => self.rename(rest,drest2),
+                ".." => self.parent().ok_or(VfsError::NotFound)?.remove(rest),
+                _ => {
+                    let subdir = self
+                        .children
+                        .read()
+                        .get(name)
+                        .ok_or(VfsError::NotFound)?
+                        .clone();
+                    subdir.rename(rest,drest2)
+                }
+            }
+        } else if name.is_empty() || name == "." || name == ".." {
+            Err(VfsError::InvalidInput) // remove '.' or '..
+        } else {
+            self.rename_node(name,dname)
         }
     }
 
