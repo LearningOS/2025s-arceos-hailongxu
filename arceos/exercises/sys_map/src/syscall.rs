@@ -140,7 +140,50 @@ fn sys_mmap(
     fd: i32,
     _offset: isize,
 ) -> isize {
-    unimplemented!("no sys_mmap!");
+
+    use memory_addr::MemoryAddr;
+    use memory_addr::{VirtAddr,VirtAddrRange};
+    use alloc::vec;
+
+    let current = current();
+    let mut aspace = current
+        .task_ext()
+        .aspace
+        .lock();
+
+    let addr = if addr.is_null() {
+        const ZERO_VIRT_ADDR: VirtAddr = VirtAddr::from_usize(0);
+        let limit = VirtAddrRange::new(aspace.base(),aspace.end());
+        aspace.find_free_area(ZERO_VIRT_ADDR, length, limit)
+            .expect("No free area found for mmap")
+    } else {
+        VirtAddr::from_mut_ptr_of(addr)
+    };
+
+    let vaddr = addr.align_down_4k();
+    let vaddr_end = (addr+length).align_up_4k();
+    let size = vaddr_end - vaddr;
+
+    let flag_prot = MappingFlags::from(MmapProt::from_bits(prot).unwrap());
+    let flag_mmap = MappingFlags::USER;
+    let flag = flag_prot | flag_mmap;
+    let populate = true;
+    if aspace
+        .map_alloc(vaddr, size, flag, populate)
+        .is_err() {
+        return 0;
+    }
+
+    let mut data = vec![0u8; length];
+    let len = sys_read(fd, data.as_mut_ptr() as *mut c_void, length);
+    if len as usize != length { // len < 0 error
+        // ax_println!("sys_mmap: sys_read failed with error code {}", len);
+        return 0;
+    }
+
+    aspace.write(addr, &data)
+        .map_or(0, |_|addr.as_ptr() as isize)
+
 }
 
 fn sys_openat(dfd: c_int, fname: *const c_char, flags: c_int, mode: api::ctypes::mode_t) -> isize {

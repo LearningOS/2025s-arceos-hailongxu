@@ -147,8 +147,11 @@ impl AddrSpace {
         if !self.contains_range(start, size) {
             return ax_err!(InvalidInput, "address out of range");
         }
-        if !start.is_aligned_4k() || !is_aligned_4k(size) {
+        if !start.is_aligned_4k() {
             return ax_err!(InvalidInput, "address not aligned");
+        }
+        if !is_aligned_4k(size) {
+            return ax_err!(InvalidInput, "size not aligned 4k");
         }
 
         let area = MemoryArea::new(start, size, flags, Backend::new_alloc(populate));
